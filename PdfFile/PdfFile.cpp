@@ -628,6 +628,11 @@ void CPdfFile::SetDocumentID(const std::wstring& wsDocumentID)
 	if (m_pInternal->pWriter)
 		m_pInternal->pWriter->SetDocumentID(wsDocumentID);
 }
+void CPdfFile::SetPresentationMode(bool bPresentation)
+{
+	if (m_pInternal->pWriter)
+		m_pInternal->pWriter->SetPresentationMode(bPresentation);
+}
 void CPdfFile::AddMetaData(const std::wstring& sMetaName, BYTE* pMetaData, DWORD nMetaLength)
 {
 	if (m_pInternal->pWriter)

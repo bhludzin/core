@@ -50,6 +50,7 @@
 #include "../DesktopEditor/graphics/GraphicsPath.h"
 #include "../DesktopEditor/graphics/MetafileToRenderer.h"
 #include "../DesktopEditor/raster/Metafile/MetaFileCommon.h"
+#include "../OfficeUtils/src/OfficeUtils.h"
 
 #include "../UnicodeConverter/UnicodeConverter.h"
 #ifndef BUILDING_WASM_MODULE
@@ -67,6 +68,8 @@
 #if defined(CreateDirectory)
 #undef CreateDirectory
 #endif
+
+#include <unordered_set>
 
 #define MM_2_PT(X) ((X) * 72.0 / 25.4)
 #define PT_2_MM(X) ((X) * 25.4 / 72.0)
@@ -175,6 +178,9 @@ CPdfWriter::CPdfWriter(NSFonts::IApplicationFonts* pAppFonts, bool isPDFA, IRend
 
 	m_bValid      = true;
 	m_bSplit      = false;
+	m_bPresentation = false;
+	m_pDirectImage  = nullptr;
+	m_dDirectImageX = m_dDirectImageY = m_dDirectImageW = m_dDirectImageH = 0;
 	m_dPageHeight = 297;
 	m_dPageWidth  = 210;
 	m_pPage       = nullptr;
@@ -943,7 +949,20 @@ HRESULT CPdfWriter::DrawPath(NSFonts::IApplicationFonts* pAppFonts, const std::w
 		return S_OK;
 	}
 
-	if (!m_pShading)
+	if (m_pDirectImage)
+	{
+		// A picture is drawn as its image clipped to the shape, as PowerPoint draws it, not as a tiling pattern (K6)
+		m_pPage->GrSave();
+		m_oPath.Clip(m_pPage, bEoFill);
+		m_pPage->DrawImage(m_pDirectImage, m_dDirectImageX, m_dDirectImageY, m_dDirectImageW, m_dDirectImageH);
+		m_pPage->GrRestore();
+
+		if (bStroke)
+			m_oPath.Draw(m_pPage, bStroke, false, false);
+
+		m_pDirectImage = nullptr;
+	}
+	else if (!m_pShading)
 	{
 		m_oPath.Draw(m_pPage, bStroke, bFill, bEoFill);
 	}
@@ -3463,9 +3482,254 @@ PdfWriter::CImageDict* CPdfWriter::LoadImage(Aggplus::CImage* pImage, BYTE nAlph
 
 	return pPdfImage;
 }
+// Slides (K6): a stretched picture is left for DrawPath to draw as its image clipped to the path, as PowerPoint draws
+// it, and the image holds only the part of the picture inside the path's bounds, as PowerPoint crops a picture
+// (srcRect) in its PDF. Returns false to leave the picture to the tiling pattern.
+bool CPdfWriter::UpdateSlidePictureBrush(const std::wstring& wsTexturePath, BYTE nAlpha)
+{
+	// the picture's rect and the path's bounds, PDF user space (y up: dB is the top)
+	double dPL, dPB, dPR, dPT;
+	m_oPath.GetBounds(dPL, dPB, dPR, dPT);
+
+	double dL, dR, dT, dB;
+	CBrushState::TBrushRect& oRect = m_oBrush.GetBrushRect();
+	if (!oRect.bUse)
+	{
+		dL = dPL;
+		dT = dPB;
+		dR = dPR;
+		dB = dPT;
+	}
+	else
+	{
+		double dOffsetX, dOffsetY;
+		m_oBrush.GetBrushOffset(dOffsetX, dOffsetY);
+
+		dL = MM_2_PT(oRect.dLeft + dOffsetX);
+		dB = MM_2_PT(m_dPageHeight - oRect.dTop - dOffsetY);
+		dR = MM_2_PT(oRect.dLeft + oRect.dWidth);
+		dT = MM_2_PT(m_dPageHeight - oRect.dTop - oRect.dHeight);
+	}
+	if (dR - dL < 0.001 || dB - dT < 0.001)
+		return false;
+
+	// the part shown, as fractions of the picture's width from its left and of its height from its top
+	double fL = std::max(0.0, (dPL - dL) / (dR - dL));
+	double fR = std::min(1.0, (dPR - dL) / (dR - dL));
+	double fT = std::max(0.0, (dB - dPT) / (dB - dT));
+	double fB = std::min(1.0, (dB - dPB) / (dB - dT));
+	if (fR - fL < 0.0001 || fB - fT < 0.0001)
+		return false;
+	bool bCrop = fL > 0.0001 || fT > 0.0001 || fR < 0.9999 || fB < 0.9999;
+	if (!bCrop)
+	{
+		fL = fT = 0;
+		fR = fB = 1;
+	}
+
+	std::wstring wsKey = wsTexturePath;
+	if (bCrop)
+	{
+		wchar_t sCrop[128];
+		swprintf(sCrop, 128, L"|crop %.5f %.5f %.5f %.5f", fL, fT, fR, fB);
+		wsKey += sCrop;
+	}
+
+	PdfWriter::CImageDict* pImage = nullptr;
+	if (m_pDocument->HasImage(wsKey, nAlpha))
+		pImage = m_pDocument->GetImage(wsKey, nAlpha);
+	else
+	{
+		Aggplus::CImage oImage(wsTexturePath);
+		int nW = abs((int)oImage.GetWidth());
+		int nH = abs((int)oImage.GetHeight());
+		BYTE* pData = oImage.GetData();
+		if (nW <= 0 || nH <= 0 || !pData)
+			return false;
+
+		if (!bCrop)
+			pImage = LoadSlideImage(&oImage, nAlpha);
+		else
+		{
+			int nX0 = std::max(0, std::min(nW - 1, (int)floor(fL * nW + 0.5)));
+			int nY0 = std::max(0, std::min(nH - 1, (int)floor(fT * nH + 0.5)));
+			int nX1 = std::max(nX0 + 1, std::min(nW, (int)floor(fR * nW + 0.5)));
+			int nY1 = std::max(nY0 + 1, std::min(nH, (int)floor(fB * nH + 0.5)));
+			int nCW = nX1 - nX0, nCH = nY1 - nY0;
+			bool bFlip = oImage.GetStride() < 0; // the last row in memory is the top row
+
+			BYTE* pCrop = new BYTE[4 * nCW * nCH];
+			for (int j = 0; j < nCH; ++j)
+			{
+				int nRow = bFlip ? (nH - nY1) + j : nY0 + j;
+				memcpy(pCrop + 4 * nCW * j, pData + 4 * (nRow * nW + nX0), 4 * nCW);
+			}
+
+			Aggplus::CImage oCrop;
+			oCrop.Create(pCrop, nCW, nCH, bFlip ? -4 * nCW : 4 * nCW, true);
+			pImage = LoadSlideImage(&oCrop, nAlpha);
+			oCrop.Destroy();
+			delete[] pCrop;
+		}
+
+		if (!pImage)
+			return false;
+		m_pDocument->AddImage(wsKey, nAlpha, pImage);
+	}
+
+	m_pDirectImage  = pImage;
+	m_dDirectImageX = dL + fL * (dR - dL);
+	m_dDirectImageW = (fR - fL) * (dR - dL);
+	m_dDirectImageY = dB - fB * (dB - dT);
+	m_dDirectImageH = (fB - fT) * (dB - dT);
+	return true;
+}
+// Encodes a slide picture as PowerPoint's PDF export does (K6): lossless (the RGB, Flate) when it has at most 256 colours
+// or when JPEG would not make it smaller, otherwise JPEG at quality 75. Transparency (the picture's own, times nAlpha)
+// becomes a soft mask, with the colour premultiplied by it, /Matte [0 0 0].
+PdfWriter::CImageDict* CPdfWriter::LoadSlideImage(Aggplus::CImage* pImage, BYTE nAlpha)
+{
+	int nW = abs((int)pImage->GetWidth());
+	int nH = abs((int)pImage->GetHeight());
+	BYTE* pData = pImage->GetData();
+	if (nW <= 0 || nH <= 0 || !pData)
+		return nullptr;
+
+	unsigned int unPixels = (unsigned int)nW * (unsigned int)nH;
+	bool bFlip = pImage->GetStride() < 0; // as LoadSMask reads such an image: the last row in memory is the top row
+
+	bool bAlpha = false;
+	std::unordered_set<unsigned int> oColors;
+	for (unsigned int i = 0; i < unPixels; ++i)
+	{
+		const BYTE* p = pData + 4 * i;
+		if (p[3] < 255)
+			bAlpha = true;
+		if (oColors.size() <= 256)
+			oColors.insert(p[0] | (p[1] << 8) | (p[2] << 16) | ((unsigned int)p[3] << 24));
+	}
+	bool bLossless = oColors.size() <= 256;
+
+	// the colour, premultiplied by the mask when there is one, in the image's memory order (BGRA), and the mask
+	BYTE* pColor = new BYTE[4 * unPixels];
+	BYTE* pMaskMem = (bAlpha || nAlpha < 255) ? new BYTE[unPixels] : nullptr;
+	for (unsigned int i = 0; i < unPixels; ++i)
+	{
+		const BYTE* p = pData + 4 * i;
+		BYTE* q = pColor + 4 * i;
+		unsigned int a = p[3];
+		if (nAlpha < 255)
+			a = (a * nAlpha + 127) / 255;
+		if (pMaskMem)
+		{
+			pMaskMem[i] = (BYTE)a;
+			q[0] = (BYTE)((p[0] * a + 127) / 255);
+			q[1] = (BYTE)((p[1] * a + 127) / 255);
+			q[2] = (BYTE)((p[2] * a + 127) / 255);
+		}
+		else
+		{
+			q[0] = p[0];
+			q[1] = p[1];
+			q[2] = p[2];
+		}
+		q[3] = 255;
+	}
+
+	// the RGB and the mask, rows top to bottom
+	BYTE* pRGB = new BYTE[3 * unPixels];
+	BYTE* pMask = pMaskMem ? new BYTE[unPixels] : nullptr;
+	for (int y = 0; y < nH; ++y)
+	{
+		int nRow = bFlip ? nH - 1 - y : y;
+		for (int x = 0; x < nW; ++x)
+		{
+			const BYTE* p = pColor + 4 * (nRow * nW + x);
+			BYTE* q = pRGB + 3 * (y * nW + x);
+			q[0] = p[2];
+			q[1] = p[1];
+			q[2] = p[0];
+			if (pMask)
+				pMask[y * nW + x] = pMaskMem[nRow * nW + x];
+		}
+	}
+
+	BYTE* pJpeg = nullptr;
+	int nJpegSize = 0;
+	if (!bLossless)
+	{
+		CBgraFrame oFrame;
+		oFrame.put_Width(nW);
+		oFrame.put_Height(nH);
+		oFrame.put_Stride(pImage->GetStride());
+		oFrame.put_Data(pColor);
+		oFrame.SetJpegQuality(75.0);
+		if (!oFrame.Encode(pJpeg, nJpegSize, _CXIMAGE_FORMAT_JPG))
+		{
+			pJpeg = nullptr;
+			nJpegSize = 0;
+		}
+		oFrame.ClearNoAttack();
+
+		if (!pJpeg || nJpegSize <= 0)
+			bLossless = true;
+		else
+		{
+			// the size of the RGB deflated, at the level the writer compresses streams at
+			CDeflate oDeflate;
+			unsigned int unOut = 3 * unPixels + 3 * unPixels / 1000 + 64;
+			BYTE* pOut = new BYTE[unOut];
+			oDeflate.SetOut(pOut, unOut);
+			oDeflate.Init(DEFLATE_DEFAULT_COMPRESSION, -1);
+			oDeflate.SetIn(pRGB, 3 * unPixels);
+			int nRes = oDeflate.Process(DEFLATE_FINISH);
+			unsigned int unFlate = unOut - oDeflate.GetAvailOut();
+			oDeflate.End();
+			delete[] pOut;
+			if (DEFLATE_STREAM_END == nRes && unFlate <= (unsigned int)nJpegSize)
+				bLossless = true;
+		}
+	}
+
+	PdfWriter::CImageDict* pPdfImage = m_pDocument->CreateImage();
+	if (pPdfImage)
+	{
+		if (pMask)
+		{
+			pPdfImage->LoadSMask(pMask, unPixels, (unsigned int)nW, (unsigned int)nH);
+			PdfWriter::CDictObject* pSMask = (PdfWriter::CDictObject*)pPdfImage->Get("SMask");
+			if (pSMask)
+			{
+				PdfWriter::CArrayObject* pMatte = new PdfWriter::CArrayObject();
+				pMatte->Add(0);
+				pMatte->Add(0);
+				pMatte->Add(0);
+				pSMask->Add("Matte", pMatte);
+			}
+		}
+
+		if (bLossless)
+			pPdfImage->LoadRaw(pRGB, 3 * unPixels, (unsigned int)nW, (unsigned int)nH);
+		else
+			pPdfImage->LoadJpeg(pJpeg, nJpegSize, (unsigned int)nW, (unsigned int)nH);
+	}
+
+	if (pJpeg)
+		free(pJpeg);
+	delete[] pRGB;
+	delete[] pColor;
+	if (pMask)
+		delete[] pMask;
+	if (pMaskMem)
+		delete[] pMaskMem;
+
+	return pPdfImage;
+}
 PdfWriter::CImageDict* CPdfWriter::DrawImage(Aggplus::CImage* pImage, const double& dX, const double& dY, const double& dW, const double& dH, const BYTE& nAlpha)
 {
-	PdfWriter::CImageDict* pPdfImage = LoadImage(pImage, nAlpha);
+	// Slides: an image drawn on its own (a blurred shadow, a metafile's raster) is encoded as PowerPoint encodes its
+	// images (K6)
+	PdfWriter::CImageDict* pPdfImage = m_bPresentation ? LoadSlideImage(pImage, nAlpha) : LoadImage(pImage, nAlpha);
 	if (!pPdfImage)
 		return nullptr;
 
@@ -3979,6 +4243,7 @@ void CPdfWriter::UpdateBrush(NSFonts::IApplicationFonts* pAppFonts, const std::w
 {
 	m_pShading = nullptr;
 	m_pShadingExtGrState = nullptr;
+	m_pDirectImage = nullptr;
 
 	LONG lBrushType = m_oBrush.GetType();
 	if (c_BrushTypeTexture == lBrushType)
@@ -3986,6 +4251,13 @@ void CPdfWriter::UpdateBrush(NSFonts::IApplicationFonts* pAppFonts, const std::w
 		std::wstring wsTexturePath = m_oBrush.GetTexturePath();
 		BYTE nAlpha = m_oBrush.GetTextureAlpha();
 		CImageFileFormatChecker oImageFormat(wsTexturePath);
+
+		bool bSlideRaster = m_bPresentation && (_CXIMAGE_FORMAT_JPG == oImageFormat.eFileType || _CXIMAGE_FORMAT_PNG == oImageFormat.eFileType ||
+												_CXIMAGE_FORMAT_BMP == oImageFormat.eFileType || _CXIMAGE_FORMAT_GIF == oImageFormat.eFileType ||
+												_CXIMAGE_FORMAT_TIF == oImageFormat.eFileType);
+		if (bSlideRaster && c_BrushTextureModeStretch == m_oBrush.GetTextureMode() && m_arrRedact.empty() &&
+			UpdateSlidePictureBrush(wsTexturePath, nAlpha))
+			return;
 
 		PdfWriter::CImageDict* pImage = nullptr;
 		int nImageW = 0;
@@ -3997,6 +4269,19 @@ void CPdfWriter::UpdateBrush(NSFonts::IApplicationFonts* pAppFonts, const std::w
 			nImageH = pImage->GetHeight();
 			nImageW = pImage->GetWidth();
 			bHasImage = true;
+		}
+		else if (bSlideRaster)
+		{
+			// Slides: PowerPoint re-encodes every picture, a JPEG too (K6)
+			Aggplus::CImage oImage(wsTexturePath);
+			nImageW = abs((int)oImage.GetWidth());
+			nImageH = abs((int)oImage.GetHeight());
+			pImage = LoadSlideImage(&oImage, nAlpha);
+			if (pImage)
+			{
+				m_pDocument->AddImage(wsTexturePath, nAlpha, pImage);
+				bHasImage = true; // the transparency is in the image
+			}
 		}
 		else if (_CXIMAGE_FORMAT_JPG == oImageFormat.eFileType || _CXIMAGE_FORMAT_JP2 == oImageFormat.eFileType)
 		{
