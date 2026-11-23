@@ -616,8 +616,12 @@ namespace PdfWriter
 			arrNewCmapTable[17] = 0;          //
 			arrNewCmapTable[18] = 0;          // firstCode
 			arrNewCmapTable[19] = 0;          //
-			arrNewCmapTable[20] = 0x01;       // entryCount
-			arrNewCmapTable[21] = 0x00;       //
+			// entryCount: the codes written below. It was always 256, so a font
+			// with fewer codes had a cmap that ran past its own end, and Windows'
+			// PDF renderer rejected the font: it drew the text from ToUnicode with
+			// a system font, which loses glyphs that stand for several characters.
+			arrNewCmapTable[20] = (unCodesCount >> 8) & 0xFF;
+			arrNewCmapTable[21] = unCodesCount & 0xFF;
 
 			for (i = 0; i < unCodesCount; ++i)
 			{
