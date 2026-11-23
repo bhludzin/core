@@ -229,12 +229,16 @@ public:
 	void SetHeadings(CHeadings* pCommand);
 	void SetNeedAddHelvetica(bool bNeedAddHelvetica);
 	void SetSplit(bool bSplit) { m_bSplit = bSplit; }
+	// Slides: pictures are drawn and encoded as PowerPoint draws them in its PDFs (K6)
+	void SetPresentationMode(bool bPresentation) { m_bPresentation = bPresentation; }
 
 private:
 	PdfWriter::CAction* GetAction(CAnnotFieldInfo::CActionFieldPr* pAction, bool bDeferred = false);
 	bool SkipRedact(const double& dX, const double& dY, const double& dW, const double& dH);
 	bool SkipRedact(const double& dX, const double& dY);
 	PdfWriter::CImageDict* LoadImage(Aggplus::CImage* pImage, BYTE nAlpha);
+	PdfWriter::CImageDict* LoadSlideImage(Aggplus::CImage* pImage, BYTE nAlpha);
+	bool UpdateSlidePictureBrush(const std::wstring& wsTexturePath, BYTE nAlpha);
 	PdfWriter::CImageDict* DrawImage(Aggplus::CImage* pImage, const double& dX, const double& dY, const double& dW, const double& dH, const BYTE& nAlpha);
 	bool DrawText(unsigned char* pCodes, const unsigned int& unLen, const double& dX, const double& dY, const std::string& sPUA);
 	bool DrawTextToRenderer(const unsigned int* unGid, const unsigned int& unLen, const double& dX, const double& dY, const std::wstring& wsUnicodeText = L"");
@@ -299,6 +303,10 @@ private:
 
 	bool                         m_bValid;
 	bool                         m_bSplit;
+	bool                         m_bPresentation;
+	// a picture fill UpdateBrush leaves for DrawPath to draw as an image clipped to the path (K6)
+	PdfWriter::CImageDict*       m_pDirectImage;
+	double                       m_dDirectImageX, m_dDirectImageY, m_dDirectImageW, m_dDirectImageH;
 
 	friend class PdfWriter::RedactOutputDev;
 };

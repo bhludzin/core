@@ -364,6 +364,8 @@ namespace NExtractTools
 			pdfWriter.CreatePdf(params.getIsPDFA());
 			pdfWriter.SetTempDirectory(convertParams.m_sTempDir);
 			pdfWriter.SetDocumentInfo(params.getTitle(), L"", L"", L"");
+			if (NSDoctRenderer::DoctRendererFormat::FormatFile::PPTT == eFromType)
+				pdfWriter.SetPresentationMode(true);
 
 			CConvertFromBinParams oBufferParams;
 			oBufferParams.m_sThemesDirectory        = convertParams.m_sThemesDir;

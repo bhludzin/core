@@ -161,6 +161,8 @@ public:
 	void RotatePage   (int nRotate);
 	void SetPassword  (const std::wstring& wsPassword);
 	void SetDocumentID(const std::wstring& wsDocumentID);
+	// Slides: pictures are drawn and encoded as PowerPoint draws them in its PDFs
+	void SetPresentationMode(bool bPresentation);
 	void Sign(const double& dX = 0, const double& dY = 0, const double& dW = 0, const double& dH = 0, const std::wstring& wsPicturePath = L"", CPDFSignatureInfo* pSigInfo = NULL);
 	bool PrepareSignature(const std::wstring& wsPath);
 	bool FinalizeSignature(BYTE* pSignedData, DWORD dwDataLength);
