@@ -1760,6 +1760,30 @@ namespace NSBinPptxRW
 		m_mapRelsImages.insert(std::pair<std::wstring, _relsGeneratorInfo>(strMediaRelsPath, oRelsGeneratorInfo));
 		return oRelsGeneratorInfo;
 	}
+	_relsGeneratorInfo CRelsGenerator::WriteMediaPart(const std::wstring& strFile, const std::wstring& strRelsType)
+	{
+		_relsGeneratorInfo oRelsGeneratorInfo;
+
+		_imageManager2Info oImageManagerInfo = m_pManager->GenerateMedia(strFile);
+		if (oImageManagerInfo.sFilepathImage.empty())
+			return oRelsGeneratorInfo;
+
+		std::wstring strMediaRelsPath = (m_pManager->m_nDocumentType == XMLWRITER_DOC_TYPE_DOCX) ? L"media/" : L"../media/";
+		strMediaRelsPath += OOX::CPath(oImageManagerInfo.sFilepathImage).GetFilename();
+
+		std::map<std::wstring, _relsGeneratorInfo>::iterator pPair = m_mapRelsImages.find(strMediaRelsPath);
+		if (m_mapRelsImages.end() != pPair)
+			return pPair->second;
+
+		oRelsGeneratorInfo.nMediaRId		= m_lNextRelsID++;
+		oRelsGeneratorInfo.sFilepathMedia	= oImageManagerInfo.sFilepathImage;
+
+		m_pWriter->WriteString(L"<Relationship Id=\"rId" + std::to_wstring(oRelsGeneratorInfo.nMediaRId) +
+			L"\" Type=\"" + XmlUtils::EncodeXmlString(strRelsType) + L"\" Target=\"" + strMediaRelsPath + L"\"/>");
+
+		m_mapRelsImages.insert(std::pair<std::wstring, _relsGeneratorInfo>(strMediaRelsPath, oRelsGeneratorInfo));
+		return oRelsGeneratorInfo;
+	}
 
 	_relsGeneratorInfo CRelsGenerator::WriteImage(const std::wstring& strImage, std::vector<NSCommon::smart_ptr<OOX::File>>& additionalFiles, const std::wstring& oleData, std::wstring strBase64Image = L"")
 	{

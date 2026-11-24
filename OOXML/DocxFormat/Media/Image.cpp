@@ -72,5 +72,25 @@ namespace OOX
 	{
 		return m_filename.GetFilename();
 	}
+//--------------------------------------------------------------------------------------
+	HdPhoto::HdPhoto(OOX::Document* pMain, const CPath& filename, bool bExternal) : Media(pMain, filename, bExternal)
+	{
+	}
+	HdPhoto::~HdPhoto()
+	{
+	}
+	const FileType HdPhoto::type() const
+	{
+		return FileTypes::HdPhoto;
+	}
+	const CPath HdPhoto::DefaultDirectory() const
+	{
+		if (m_bDocument) return type().DefaultDirectory();
+		else	return L"../" + type().DefaultDirectory();
+	}
+	const CPath HdPhoto::DefaultFileName() const
+	{
+		return m_filename.GetFilename();
+	}
 
 } // namespace OOX

@@ -426,7 +426,14 @@ namespace PPTX
 										blip->mediaRid		= OOX::RId(oRelsGeneratorInfo.nMediaRId).get();
 										blip->mediaFilepath	= oRelsGeneratorInfo.sFilepathMedia;
 									}
-									pReader->Skip(1); // end attribute									
+									pReader->Skip(1); // end attribute
+								}break;
+								case 4:
+								{
+									if (!blip.is_init())
+										blip = new PPTX::Logic::Blip();
+
+									blip->ReadUnknownExtLstPPTY(pReader);
 								}break;
 								default:
 								{

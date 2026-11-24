@@ -506,6 +506,9 @@ namespace NSBinPptxRW
 
 		_relsGeneratorInfo WriteImage (const std::wstring& strImage, std::vector<NSCommon::smart_ptr<OOX::File>>& additionalFiles, const std::wstring& oleData, std::wstring strBase64Image);
 		_relsGeneratorInfo WriteMedia (const std::wstring& strMedia, int type = 0);
+		// copies strFile into the media folder and relates it with the given relationship type
+		// (nMediaRId; 0 when the file is missing)
+		_relsGeneratorInfo WriteMediaPart (const std::wstring& strFile, const std::wstring& strRelsType);
 	};
 
 	class CBinaryFileReader

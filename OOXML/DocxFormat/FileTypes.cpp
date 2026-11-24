@@ -177,6 +177,11 @@ namespace OOX
 		const FileType SvgBlip			(L"media", L"image",
 												L"",
 												L"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image", L"image", true, true);
+
+		// a14:imgLayer's original picture (HD Photo / JPEG XR, .wdp) behind PowerPoint's picture corrections
+		const FileType HdPhoto			(L"media", L"hdphoto",
+												L"",
+												L"http://schemas.microsoft.com/office/2007/relationships/hdphoto", L"hdphoto", true, true);
 		
 
 		const FileType DiagramData		(L"diagrams", L"data.xml",
