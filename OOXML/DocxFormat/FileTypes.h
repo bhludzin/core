@@ -106,6 +106,8 @@ namespace OOX
 
 		extern const FileType SvgBlip;
 
+		extern const FileType HdPhoto;
+
 		extern const FileType DiagramData;
 
 		extern const FileType DiagramQuickStyle;

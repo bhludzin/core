@@ -61,6 +61,23 @@ namespace PPTX
 			std::vector<UniEffect>	Effects;
 			std::vector<Ext>		ExtLst;
 
+			// The a:ext entries of a:extLst that this model does not read (PowerPoint's a14:imgProps
+			// picture corrections, whose a14:imgLayer relates the original picture as an HD Photo part,
+			// a14:useLocalDpi, ...). They pass through the editor as the blip's PPTY record 4 and are
+			// written back as read, with their parts, so PowerPoint can still change or reset them.
+			struct UnknownExt
+			{
+				std::wstring				uri;
+				std::wstring				xml;	// the a:ext element
+				std::vector<std::wstring>	rIds;	// its r:* attribute values, in document order
+			};
+			std::vector<UnknownExt>		UnknownExtLst;		// read from the document (pptx -> PPTY)
+			std::vector<std::wstring>	UnknownExtLstXml;	// read from PPTY, relationships rewritten (PPTY -> pptx)
+
+			void ReadUnknownExt(XmlUtils::CXmlNode& oNode);
+			void WriteUnknownExtLstPPTY(NSBinPptxRW::CBinaryFileWriter* pWriter) const;
+			void ReadUnknownExtLstPPTY(NSBinPptxRW::CBinaryFileReader* pReader);
+
 			nullable_limit<Limit::BlipCompression> cstate;
 			nullable<OOX::RId>	embed;
 			nullable<OOX::RId>	link;

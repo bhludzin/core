@@ -53,5 +53,18 @@ namespace OOX
 		virtual const CPath DefaultDirectory() const;
 		virtual const CPath DefaultFileName() const;
 	};
+
+	// The HD Photo (.wdp) part an a14:imgLayer points at: the original of a corrected picture.
+	class HdPhoto : public Media
+	{
+	public:
+		HdPhoto(OOX::Document* pMain, const CPath& filename, bool bExternal = false);
+		virtual ~HdPhoto();
+
+		virtual const FileType type() const;
+
+		virtual const CPath DefaultDirectory() const;
+		virtual const CPath DefaultFileName() const;
+	};
 	
 } // namespace OOX

@@ -130,6 +130,8 @@ namespace PPTX
 			return smart_ptr<OOX::File>(new OOX::HyperLink(pMain, relation.Target()));
 		else if (relation.Type() == OOX::FileTypes::Image)
 			return smart_ptr<OOX::File>(new OOX::Image(pMain, filename, relation.IsExternal()));
+		else if (relation.Type() == OOX::FileTypes::HdPhoto)
+			return smart_ptr<OOX::File>(new OOX::HdPhoto(pMain, filename, relation.IsExternal()));
 		else if (relation.Type() == OOX::FileTypes::Audio)
 			return smart_ptr<OOX::File>(new OOX::Audio(pMain, filename, relation.IsExternal()));
 		else if (relation.Type() == OOX::FileTypes::Media)
